@@ -130,27 +130,21 @@ export function useBudgetData(): BudgetData {
         }
         
         const now = new Date();
-        // Use local date format (JST) instead of ISO/UTC
         const year = now.getFullYear();
         const month = now.getMonth() + 1;
-        const day = now.getDate();
-        
-        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-        const endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-        console.log('Fetching Zaim data:', { startDate, endDate });
+        console.log('Fetching Zaim data for:', year, month);
 
-        const response = await zaimService.getMoney({
-          start_date: startDate,
-          end_date: endDate,
-        });
+        // 全データを取得（APIの日付フィルタが不安定なため）
+        const response = await zaimService.getMoney({});
 
         console.log('Zaim API response:', JSON.stringify(response, null, 2));
 
         // Handle different response formats
         const moneyData = response.money || [];
         
-        const zaimTransactions: ZaimMoney[] = moneyData.map((m: any) => ({
+        // 全データをパース
+        const allTransactions: ZaimMoney[] = moneyData.map((m: any) => ({
           id: m.id,
           date: m.date,
           amount: m.amount,
@@ -162,7 +156,15 @@ export function useBudgetData(): BudgetData {
           created: m.created,
         }));
 
-        console.log('Parsed transactions:', zaimTransactions.length);
+        console.log('Total transactions from API:', allTransactions.length);
+        
+        // 今月のデータのみフィルタリング
+        const currentYearMonth = `${year}-${String(month).padStart(2, '0')}`;
+        const zaimTransactions = allTransactions.filter(t => 
+          t.date && t.date.startsWith(currentYearMonth)
+        );
+
+        console.log('Filtered to current month:', zaimTransactions.length, 'for', currentYearMonth);
         setTransactions(zaimTransactions);
 
         // 計算

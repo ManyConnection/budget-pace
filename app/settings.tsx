@@ -173,29 +173,31 @@ export default function SettingsScreen() {
         console.error('Failed to update categories:', catError);
       }
       
-      // 今月のデータを取得
+      // 全データを取得（APIの日付フィルタが不安定なため）
+      const money = await zaimService.getMoney({});
+      
       const now = new Date();
       const year = now.getFullYear();
       const month = now.getMonth() + 1;
-      const day = now.getDate();
-      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-      const endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      
-      const money = await zaimService.getMoney({
-        start_date: startDate,
-        end_date: endDate,
-      });
+      const currentYearMonth = `${year}-${String(month).padStart(2, '0')}`;
       
       console.log('Money response:', JSON.stringify(money, null, 2));
       
-      const count = money.money?.length || 0;
-      const firstFew = money.money?.slice(0, 3).map((m: any) => 
+      // 今月のデータのみフィルタリング
+      const allData = money.money || [];
+      const thisMonthData = allData.filter((m: any) => 
+        m.date && m.date.startsWith(currentYearMonth)
+      );
+      
+      const count = thisMonthData.length;
+      const totalCount = allData.length;
+      const firstFew = thisMonthData.slice(0, 3).map((m: any) => 
         `${m.date}: ¥${m.amount}`
       ).join('\n') || 'データなし';
       
       Alert.alert(
         '取得結果',
-        `${userInfo}\n\n取得件数: ${count}件\n\n最初の3件:\n${firstFew}`
+        `${userInfo}\n\n全件: ${totalCount}件\n今月(${currentYearMonth}): ${count}件\n\n今月の最初の3件:\n${firstFew}`
       );
     } catch (error: any) {
       console.error('Failed to refresh data:', error);
