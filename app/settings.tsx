@@ -173,8 +173,18 @@ export default function SettingsScreen() {
         console.error('Failed to update categories:', catError);
       }
       
-      // 日付指定なしで全データ取得を試す
-      const money = await zaimService.getMoney({});
+      // 今月のデータを取得
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth() + 1;
+      const day = now.getDate();
+      const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+      const endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      
+      const money = await zaimService.getMoney({
+        start_date: startDate,
+        end_date: endDate,
+      });
       
       console.log('Money response:', JSON.stringify(money, null, 2));
       
