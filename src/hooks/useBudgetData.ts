@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ZaimMoney, BudgetGoal, CategorySpending, DailySpending, PaceAnalysis, SpendingAlert } from '../types';
-import { generateMockTransactions } from '../data/mockData';
-import { loadBudgetGoals, saveBudgetGoals, updateBudgetGoal } from '../utils/storage';
+import { ZaimMoney, ZaimCategory, BudgetGoal, CategorySpending, DailySpending, PaceAnalysis, SpendingAlert } from '../types';
+import { loadBudgetGoals, saveBudgetGoals, updateBudgetGoal, loadSettings, loadZaimCategories, saveZaimCategories } from '../utils/storage';
+import { zaimService } from '../services/zaim';
 import {
   calculateCategorySpending,
   calculateDailySpending,
@@ -14,66 +14,178 @@ import {
 interface BudgetData {
   transactions: ZaimMoney[];
   goals: BudgetGoal[];
+  zaimCategories: ZaimCategory[];
   categorySpending: CategorySpending[];
   dailySpending: DailySpending[];
   paceAnalysis: PaceAnalysis;
   alerts: SpendingAlert[];
   isLoading: boolean;
   error: string | null;
+  isConnected: boolean;
   refreshData: () => Promise<void>;
   updateGoal: (categoryId: number, monthlyBudget: number) => Promise<void>;
 }
 
+const EMPTY_PACE: PaceAnalysis = {
+  currentSpent: 0,
+  totalBudget: 0,
+  daysElapsed: 0,
+  daysInMonth: 30,
+  projectedMonthEnd: 0,
+  idealPace: 0,
+  actualPace: 0,
+  status: 'on-track',
+  remainingBudget: 0,
+  recommendedDailyBudget: 0,
+};
+
+// カラーパレット
+const COLORS = ['#10B981', '#3B82F6', '#F59E0B', '#EC4899', '#8B5CF6', '#EF4444', '#06B6D4', '#F97316', '#6B7280'];
+
 export function useBudgetData(): BudgetData {
   const [transactions, setTransactions] = useState<ZaimMoney[]>([]);
   const [goals, setGoals] = useState<BudgetGoal[]>([]);
+  const [zaimCategories, setZaimCategories] = useState<ZaimCategory[]>([]);
   const [categorySpending, setCategorySpending] = useState<CategorySpending[]>([]);
   const [dailySpending, setDailySpending] = useState<DailySpending[]>([]);
-  const [paceAnalysis, setPaceAnalysis] = useState<PaceAnalysis>({
-    currentSpent: 0,
-    totalBudget: 0,
-    daysElapsed: 0,
-    daysInMonth: 30,
-    projectedMonthEnd: 0,
-    idealPace: 0,
-    actualPace: 0,
-    status: 'on-track',
-    remainingBudget: 0,
-    recommendedDailyBudget: 0,
-  });
+  const [paceAnalysis, setPaceAnalysis] = useState<PaceAnalysis>(EMPTY_PACE);
   const [alerts, setAlerts] = useState<SpendingAlert[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
 
+      // Zaim連携状態を確認
+      await zaimService.init();
+      const connected = await zaimService.isConnected();
+      setIsConnected(connected);
+
+      // Zaimカテゴリを読み込み
+      const storedCategories = await loadZaimCategories();
+      setZaimCategories(storedCategories);
+
       // 予算目標を読み込み
-      const loadedGoals = await loadBudgetGoals();
+      let loadedGoals = await loadBudgetGoals();
+      
+      // Zaimカテゴリがあって予算目標が古い場合は更新
+      if (storedCategories.length > 0) {
+        const paymentCategories = storedCategories.filter(c => c.mode === 'payment');
+        const hasZaimGoals = loadedGoals.some(g => 
+          paymentCategories.some(c => c.id === g.categoryId)
+        );
+        
+        if (!hasZaimGoals && paymentCategories.length > 0) {
+          // Zaimカテゴリに基づいて新しい予算目標を作成
+          loadedGoals = paymentCategories.map((cat, index) => ({
+            categoryId: cat.id,
+            categoryName: cat.name,
+            monthlyBudget: 10000,
+            color: COLORS[index % COLORS.length],
+          }));
+          await saveBudgetGoals(loadedGoals);
+        }
+      }
       setGoals(loadedGoals);
 
-      // モックデータを生成（後でZaim APIに置き換え）
-      const mockTransactions = generateMockTransactions();
-      setTransactions(mockTransactions);
+      if (!connected) {
+        // 未連携の場合は空のデータ
+        setTransactions([]);
+        setCategorySpending([]);
+        setDailySpending([]);
+        setPaceAnalysis(EMPTY_PACE);
+        setAlerts([]);
+        return;
+      }
 
-      // 計算
-      const catSpending = calculateCategorySpending(mockTransactions, loadedGoals);
-      setCategorySpending(catSpending);
+      // Zaim APIからデータ取得
+      try {
+        // カテゴリがない場合は取得
+        if (storedCategories.length === 0) {
+          try {
+            const categoryResponse = await zaimService.getCategories();
+            if (categoryResponse.categories) {
+              await saveZaimCategories(categoryResponse.categories);
+              setZaimCategories(categoryResponse.categories);
+              
+              // 予算目標も更新
+              const paymentCats = categoryResponse.categories.filter((c: ZaimCategory) => c.mode === 'payment');
+              if (paymentCats.length > 0) {
+                loadedGoals = paymentCats.map((cat: ZaimCategory, index: number) => ({
+                  categoryId: cat.id,
+                  categoryName: cat.name,
+                  monthlyBudget: 10000,
+                  color: COLORS[index % COLORS.length],
+                }));
+                await saveBudgetGoals(loadedGoals);
+                setGoals(loadedGoals);
+              }
+            }
+          } catch (catError) {
+            console.error('Failed to fetch categories:', catError);
+          }
+        }
+        
+        const now = new Date();
+        // Use local date format (JST) instead of ISO/UTC
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+        const day = now.getDate();
+        
+        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+        const endDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
-      const dailyData = calculateDailySpending(mockTransactions);
-      setDailySpending(dailyData);
+        console.log('Fetching Zaim data:', { startDate, endDate });
 
-      const pace = analyzePace(mockTransactions, loadedGoals);
-      setPaceAnalysis(pace);
+        const response = await zaimService.getMoney({
+          start_date: startDate,
+          end_date: endDate,
+        });
 
-      const alertList = generateAlerts(
-        catSpending,
-        getDaysElapsed(),
-        getDaysInMonth()
-      );
-      setAlerts(alertList);
+        console.log('Zaim API response:', JSON.stringify(response, null, 2));
+
+        // Handle different response formats
+        const moneyData = response.money || [];
+        
+        const zaimTransactions: ZaimMoney[] = moneyData.map((m: any) => ({
+          id: m.id,
+          date: m.date,
+          amount: m.amount,
+          category_id: m.category_id,
+          genre_id: m.genre_id,
+          place: m.place || '',
+          comment: m.comment || '',
+          mode: m.mode,
+          created: m.created,
+        }));
+
+        console.log('Parsed transactions:', zaimTransactions.length);
+        setTransactions(zaimTransactions);
+
+        // 計算
+        const catSpending = calculateCategorySpending(zaimTransactions, loadedGoals);
+        setCategorySpending(catSpending);
+
+        const dailyData = calculateDailySpending(zaimTransactions);
+        setDailySpending(dailyData);
+
+        const pace = analyzePace(zaimTransactions, loadedGoals);
+        setPaceAnalysis(pace);
+
+        const alertList = generateAlerts(
+          catSpending,
+          getDaysElapsed(),
+          getDaysInMonth()
+        );
+        setAlerts(alertList);
+      } catch (apiError) {
+        console.error('Zaim API error:', apiError);
+        setError('Zaimからデータを取得できませんでした');
+        setTransactions([]);
+      }
     } catch (err) {
       setError('データの読み込みに失敗しました');
       console.error(err);
@@ -90,19 +202,21 @@ export function useBudgetData(): BudgetData {
     const updatedGoals = await updateBudgetGoal(categoryId, monthlyBudget);
     setGoals(updatedGoals);
 
-    // 再計算
-    const catSpending = calculateCategorySpending(transactions, updatedGoals);
-    setCategorySpending(catSpending);
+    if (transactions.length > 0) {
+      // 再計算
+      const catSpending = calculateCategorySpending(transactions, updatedGoals);
+      setCategorySpending(catSpending);
 
-    const pace = analyzePace(transactions, updatedGoals);
-    setPaceAnalysis(pace);
+      const pace = analyzePace(transactions, updatedGoals);
+      setPaceAnalysis(pace);
 
-    const alertList = generateAlerts(
-      catSpending,
-      getDaysElapsed(),
-      getDaysInMonth()
-    );
-    setAlerts(alertList);
+      const alertList = generateAlerts(
+        catSpending,
+        getDaysElapsed(),
+        getDaysInMonth()
+      );
+      setAlerts(alertList);
+    }
   }, [transactions]);
 
   useEffect(() => {
@@ -112,12 +226,14 @@ export function useBudgetData(): BudgetData {
   return {
     transactions,
     goals,
+    zaimCategories,
     categorySpending,
     dailySpending,
     paceAnalysis,
     alerts,
     isLoading,
     error,
+    isConnected,
     refreshData,
     updateGoal: updateGoalHandler,
   };

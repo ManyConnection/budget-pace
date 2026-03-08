@@ -8,15 +8,40 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Filter, Calendar } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { Filter, Calendar, Link2, ArrowRight } from 'lucide-react-native';
 import { useBudgetData } from '../src/hooks/useBudgetData';
 import { formatCurrency } from '../src/utils/calculations';
-import { MOCK_CATEGORIES, CATEGORY_COLORS } from '../src/data/mockData';
 import { ZaimMoney } from '../src/types';
 
 export default function TransactionsScreen() {
-  const { transactions } = useBudgetData();
+  const router = useRouter();
+  const { transactions, goals, isConnected } = useBudgetData();
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
+
+  // Zaim未連携の場合
+  if (!isConnected) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.emptyContainer}>
+          <View style={styles.emptyIconBox}>
+            <Link2 size={40} color="#10B981" />
+          </View>
+          <Text style={styles.emptyTitle}>Zaimと連携してください</Text>
+          <Text style={styles.emptyDesc}>
+            連携すると支出明細を{'\n'}確認できます
+          </Text>
+          <TouchableOpacity
+            style={styles.connectButton}
+            onPress={() => router.push('/settings')}
+          >
+            <Text style={styles.connectButtonText}>設定画面へ</Text>
+            <ArrowRight size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   // フィルタリング
   const filteredTransactions = selectedCategory
@@ -39,10 +64,10 @@ export default function TransactionsScreen() {
   }, {} as Record<string, ZaimMoney[]>);
 
   const getCategoryInfo = (categoryId: number) => {
-    const category = MOCK_CATEGORIES.find(c => c.id === categoryId);
+    const goal = goals.find(g => g.categoryId === categoryId);
     return {
-      name: category?.name || 'その他',
-      color: CATEGORY_COLORS[categoryId] || '#6B7280',
+      name: goal?.categoryName || 'その他',
+      color: goal?.color || '#6B7280',
     };
   };
 
@@ -63,7 +88,7 @@ export default function TransactionsScreen() {
       <View style={styles.transactionItem} key={item.id}>
         <View style={[styles.categoryIndicator, { backgroundColor: color }]} />
         <View style={styles.transactionContent}>
-          <Text style={styles.place}>{item.place}</Text>
+          <Text style={styles.place}>{item.place || '不明'}</Text>
           <Text style={styles.category}>{name}</Text>
         </View>
         <Text style={styles.amount}>-{formatCurrency(item.amount)}</Text>
@@ -96,28 +121,28 @@ export default function TransactionsScreen() {
               すべて
             </Text>
           </TouchableOpacity>
-          {MOCK_CATEGORIES.filter(c => c.mode === 'payment').map(cat => (
+          {goals.map(goal => (
             <TouchableOpacity
-              key={cat.id}
+              key={goal.categoryId}
               style={[
                 styles.filterChip,
-                selectedCategory === cat.id && styles.filterChipActive,
+                selectedCategory === goal.categoryId && styles.filterChipActive,
               ]}
-              onPress={() => setSelectedCategory(cat.id)}
+              onPress={() => setSelectedCategory(goal.categoryId)}
             >
               <View
                 style={[
                   styles.filterDot,
-                  { backgroundColor: CATEGORY_COLORS[cat.id] },
+                  { backgroundColor: goal.color },
                 ]}
               />
               <Text
                 style={[
                   styles.filterChipText,
-                  selectedCategory === cat.id && styles.filterChipTextActive,
+                  selectedCategory === goal.categoryId && styles.filterChipTextActive,
                 ]}
               >
-                {cat.name}
+                {goal.categoryName}
               </Text>
             </TouchableOpacity>
           ))}
@@ -145,7 +170,7 @@ export default function TransactionsScreen() {
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>明細がありません</Text>
+            <Text style={styles.emptyText}>今月の明細がありません</Text>
           </View>
         }
       />
@@ -196,6 +221,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingVertical: 8,
+    flexGrow: 1,
   },
   dateGroup: {
     marginVertical: 4,
@@ -257,11 +283,56 @@ const styles = StyleSheet.create({
     color: '#EF4444',
   },
   emptyState: {
+    flex: 1,
     paddingVertical: 60,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyText: {
     fontSize: 14,
     color: '#9CA3AF',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyIconBox: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#D1FAE5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyDesc: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  connectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#10B981',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    gap: 6,
+  },
+  connectButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

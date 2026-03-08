@@ -28,6 +28,8 @@ PODS:
     - Yoga
   - ExpoAsset (55.0.8):
     - ExpoModulesCore
+  - ExpoCrypto (55.0.9):
+    - ExpoModulesCore
   - ExpoDomWebView (55.0.3):
     - ExpoModulesCore
   - ExpoFileSystem (55.0.10):
@@ -84,6 +86,8 @@ PODS:
   - ExpoSymbols (55.0.5):
     - ExpoModulesCore
   - ExpoSystemUI (55.0.9):
+    - ExpoModulesCore
+  - ExpoWebBrowser (55.0.9):
     - ExpoModulesCore
   - FBLazyVector (0.83.2)
   - hermes-engine (0.14.1):
@@ -2083,6 +2087,7 @@ DEPENDENCIES:
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - Expo (from `../node_modules/expo`)
   - ExpoAsset (from `../node_modules/expo/node_modules/expo-asset/ios`)
+  - ExpoCrypto (from `../node_modules/expo-crypto/ios`)
   - "ExpoDomWebView (from `../node_modules/@expo/dom-webview/ios`)"
   - ExpoFileSystem (from `../node_modules/expo/node_modules/expo-file-system/ios`)
   - ExpoFont (from `../node_modules/expo-font/ios`)
@@ -2096,6 +2101,7 @@ DEPENDENCIES:
   - ExpoRouter (from `../node_modules/expo-router/ios`)
   - ExpoSymbols (from `../node_modules/expo-symbols/ios`)
   - ExpoSystemUI (from `../node_modules/expo-system-ui/ios`)
+  - ExpoWebBrowser (from `../node_modules/expo-web-browser/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - RCTDeprecation (from `../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)
@@ -2192,6 +2198,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo"
   ExpoAsset:
     :path: "../node_modules/expo/node_modules/expo-asset/ios"
+  ExpoCrypto:
+    :path: "../node_modules/expo-crypto/ios"
   ExpoDomWebView:
     :path: "../node_modules/@expo/dom-webview/ios"
   ExpoFileSystem:
@@ -2218,6 +2226,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-symbols/ios"
   ExpoSystemUI:
     :path: "../node_modules/expo-system-ui/ios"
+  ExpoWebBrowser:
+    :path: "../node_modules/expo-web-browser/ios"
   FBLazyVector:
     :path: "../node_modules/react-native/Libraries/FBLazyVector"
   hermes-engine:
@@ -2378,6 +2388,7 @@ SPEC CHECKSUMS:
   EXConstants: b3c63be5f8648e4ab8e6ff5099b62f629247f969
   Expo: ed1258b36d29c6b5021951ab7933754e765587cb
   ExpoAsset: bdc7bc21fe25d197c3aa7547e14c12c42087d9c9
+  ExpoCrypto: a3470a45f37ab72cf93113088c5e106fbafa45c7
   ExpoDomWebView: f101fb3db4b6eec4163fca51f7507189b7e48661
   ExpoFileSystem: e1a42d7f69f7faae33f4d7d01708f7861f7bd757
   ExpoFont: 1aa465cf9f8ac6b670405becba8b15473581b2dd
@@ -2391,6 +2402,7 @@ SPEC CHECKSUMS:
   ExpoRouter: 6b8875b84c8eef1359039c5b703c8ed18f536825
   ExpoSymbols: 3d67a96643245a5d933ce7fbf535f95eb541f617
   ExpoSystemUI: ae936ff8f78ca3d6c13884704beb7705fe26d136
+  ExpoWebBrowser: f13a6e46e44049bbb8ce49ff8aaa4d819c87d1fe
   FBLazyVector: 32e9ed0301d0fcbc1b2b341dd7fcbf291f51eb83
   hermes-engine: ad6a31cbf739aff5051c30e683d52afbbcc4f542
   libavif: 5f8e715bea24debec477006f21ef9e95432e254d

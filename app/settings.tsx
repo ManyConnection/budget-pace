@@ -5,10 +5,12 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Switch,
-  Linking,
   Alert,
+  ActivityIndicator,
+  TextInput,
+  Modal,
 } from 'react-native';
+import * as Linking from 'expo-linking';
 import {
   Link2,
   ExternalLink,
@@ -17,29 +19,108 @@ import {
   RefreshCw,
   Database,
   Shield,
+  CheckCircle,
+  XCircle,
+  Key,
+  X,
 } from 'lucide-react-native';
-import { loadSettings, saveSettings } from '../src/utils/storage';
+import { loadSettings, saveSettings, saveZaimCategories } from '../src/utils/storage';
+import { zaimService } from '../src/services/zaim';
 import { AppSettings } from '../src/types';
 
 export default function SettingsScreen() {
   const [settings, setSettings] = useState<AppSettings>({ zaimConnected: false });
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showPINModal, setShowPINModal] = useState(false);
+  const [pinCode, setPinCode] = useState('');
+  const [isSubmittingPIN, setIsSubmittingPIN] = useState(false);
 
   useEffect(() => {
-    loadSettings().then(setSettings);
+    initializeSettings();
   }, []);
 
-  const handleZaimConnect = () => {
-    Alert.alert(
-      'Zaim連携',
-      'Zaim APIと連携するには、Zaimデベロッパーサイトでアプリを登録してAPIキーを取得してください。\n\n現在はモックデータで動作しています。',
-      [
-        { text: 'キャンセル', style: 'cancel' },
-        {
-          text: 'Zaimを開く',
-          onPress: () => Linking.openURL('https://dev.zaim.net/'),
-        },
-      ]
-    );
+  const initializeSettings = async () => {
+    try {
+      await zaimService.init();
+      const isConnected = await zaimService.isConnected();
+      const isWaiting = await zaimService.isWaitingForPIN();
+      const loadedSettings = await loadSettings();
+      setSettings({ ...loadedSettings, zaimConnected: isConnected });
+      if (isWaiting && !isConnected) {
+        setShowPINModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to initialize settings:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleZaimConnect = async () => {
+    try {
+      setIsConnecting(true);
+      const result = await zaimService.startAuth();
+      
+      if (result.success && result.authUrl) {
+        // Open Safari for authentication
+        await Linking.openURL(result.authUrl);
+        // Show PIN input modal
+        setShowPINModal(true);
+      } else {
+        Alert.alert('エラー', `${result.error}\n\nステップ: ${result.step}`);
+      }
+    } catch (error: any) {
+      console.error('Failed to connect to Zaim:', error);
+      Alert.alert('エラー', `Zaim連携に失敗しました:\n${error?.message || String(error)}`);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleSubmitPIN = async () => {
+    if (!pinCode.trim()) {
+      Alert.alert('エラー', 'PINコードを入力してください');
+      return;
+    }
+
+    try {
+      setIsSubmittingPIN(true);
+      const result = await zaimService.completeAuthWithPIN(pinCode);
+      
+      if (result.success) {
+        // カテゴリ情報を取得・保存
+        try {
+          const categoryResponse = await zaimService.getCategories();
+          if (categoryResponse.categories) {
+            await saveZaimCategories(categoryResponse.categories);
+            console.log('Saved Zaim categories:', categoryResponse.categories.length);
+          }
+        } catch (catError) {
+          console.error('Failed to fetch categories:', catError);
+          // カテゴリ取得失敗でも連携自体は成功とする
+        }
+        
+        const newSettings = { ...settings, zaimConnected: true };
+        await saveSettings(newSettings);
+        setSettings(newSettings);
+        setShowPINModal(false);
+        setPinCode('');
+        Alert.alert('成功', 'Zaimと連携しました！');
+      } else {
+        Alert.alert('エラー', `${result.error}\n\nステップ: ${result.step}`);
+      }
+    } catch (error: any) {
+      Alert.alert('エラー', error?.message || String(error));
+    } finally {
+      setIsSubmittingPIN(false);
+    }
+  };
+
+  const handleCancelAuth = async () => {
+    await zaimService.cancelAuth();
+    setShowPINModal(false);
+    setPinCode('');
   };
 
   const handleDisconnect = () => {
@@ -52,12 +133,8 @@ export default function SettingsScreen() {
           text: '解除',
           style: 'destructive',
           onPress: async () => {
-            const newSettings = {
-              ...settings,
-              zaimConnected: false,
-              zaimAccessToken: undefined,
-              zaimAccessTokenSecret: undefined,
-            };
+            await zaimService.disconnect();
+            const newSettings = { ...settings, zaimConnected: false };
             await saveSettings(newSettings);
             setSettings(newSettings);
           },
@@ -66,118 +143,274 @@ export default function SettingsScreen() {
     );
   };
 
+  const handleRefreshData = async () => {
+    if (!settings.zaimConnected) {
+      Alert.alert('未連携', 'まずZaimと連携してください。');
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      
+      // まずユーザー情報を取得してテスト
+      let userInfo = '';
+      try {
+        const user = await zaimService.getUser();
+        console.log('User info:', user);
+        userInfo = `ユーザー: ${user.me?.name || '不明'} (ID: ${user.me?.id || '?'})`;
+      } catch (userError: any) {
+        userInfo = `ユーザー取得エラー: ${userError?.message || String(userError)}`;
+      }
+      
+      // カテゴリ情報も更新
+      try {
+        const categoryResponse = await zaimService.getCategories();
+        if (categoryResponse.categories) {
+          await saveZaimCategories(categoryResponse.categories);
+          console.log('Updated Zaim categories:', categoryResponse.categories.length);
+        }
+      } catch (catError) {
+        console.error('Failed to update categories:', catError);
+      }
+      
+      // 日付指定なしで全データ取得を試す
+      const money = await zaimService.getMoney({});
+      
+      console.log('Money response:', JSON.stringify(money, null, 2));
+      
+      const count = money.money?.length || 0;
+      const firstFew = money.money?.slice(0, 3).map((m: any) => 
+        `${m.date}: ¥${m.amount}`
+      ).join('\n') || 'データなし';
+      
+      Alert.alert(
+        '取得結果',
+        `${userInfo}\n\n取得件数: ${count}件\n\n最初の3件:\n${firstFew}`
+      );
+    } catch (error: any) {
+      console.error('Failed to refresh data:', error);
+      Alert.alert('エラー', `データの取得に失敗しました:\n${error?.message || String(error)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#10B981" />
+      </View>
+    );
+  }
+
   return (
-    <ScrollView style={styles.container}>
-      {/* Zaim連携 */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>データ連携</Text>
-        <View style={styles.card}>
-          <TouchableOpacity
-            style={styles.settingItem}
-            onPress={settings.zaimConnected ? handleDisconnect : handleZaimConnect}
-          >
-            <View style={styles.settingLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#FEF3C7' }]}>
-                <Link2 size={20} color="#F59E0B" />
+    <>
+      <ScrollView style={styles.container}>
+        {/* Zaim連携 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>データ連携</Text>
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={settings.zaimConnected ? handleDisconnect : handleZaimConnect}
+              disabled={isConnecting}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.iconBox, { backgroundColor: '#FEF3C7' }]}>
+                  <Link2 size={20} color="#F59E0B" />
+                </View>
+                <View>
+                  <Text style={styles.settingLabel}>Zaim連携</Text>
+                  <Text style={styles.settingDesc}>
+                    {settings.zaimConnected 
+                      ? 'Zaimアカウントと連携中' 
+                      : 'タップしてZaimと連携'}
+                  </Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.settingLabel}>Zaim連携</Text>
-                <Text style={styles.settingDesc}>
-                  {settings.zaimConnected ? '連携済み' : 'モックデータで動作中'}
-                </Text>
-              </View>
-            </View>
-            <View style={[styles.statusBadge, { backgroundColor: settings.zaimConnected ? '#D1FAE5' : '#F3F4F6' }]}>
-              <Text style={[styles.statusText, { color: settings.zaimConnected ? '#10B981' : '#6B7280' }]}>
-                {settings.zaimConnected ? '接続中' : '未接続'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* データ管理 */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>データ管理</Text>
-        <View style={styles.card}>
-          <TouchableOpacity style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#DBEAFE' }]}>
-                <RefreshCw size={20} color="#3B82F6" />
-              </View>
-              <View>
-                <Text style={styles.settingLabel}>データを再読込</Text>
-                <Text style={styles.settingDesc}>最新の明細を取得</Text>
-              </View>
-            </View>
-            <ChevronRight size={20} color="#9CA3AF" />
-          </TouchableOpacity>
-          
-          <View style={styles.divider} />
-          
-          <TouchableOpacity style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#FCE7F3' }]}>
-                <Database size={20} color="#EC4899" />
-              </View>
-              <View>
-                <Text style={styles.settingLabel}>ローカルデータ</Text>
-                <Text style={styles.settingDesc}>予算設定はデバイスに保存</Text>
-              </View>
-            </View>
-            <ChevronRight size={20} color="#9CA3AF" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* アプリ情報 */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>アプリ情報</Text>
-        <View style={styles.card}>
-          <View style={styles.settingItem}>
-            <View style={styles.settingLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#E0E7FF' }]}>
-                <Info size={20} color="#6366F1" />
-              </View>
-              <View>
-                <Text style={styles.settingLabel}>バージョン</Text>
-                <Text style={styles.settingDesc}>1.0.0</Text>
-              </View>
-            </View>
+              {isConnecting ? (
+                <ActivityIndicator size="small" color="#10B981" />
+              ) : (
+                <View style={[
+                  styles.statusBadge, 
+                  { backgroundColor: settings.zaimConnected ? '#D1FAE5' : '#FEE2E2' }
+                ]}>
+                  {settings.zaimConnected ? (
+                    <CheckCircle size={16} color="#10B981" />
+                  ) : (
+                    <XCircle size={16} color="#EF4444" />
+                  )}
+                  <Text style={[
+                    styles.statusText, 
+                    { color: settings.zaimConnected ? '#10B981' : '#EF4444' }
+                  ]}>
+                    {settings.zaimConnected ? '接続中' : '未接続'}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
-          
-          <View style={styles.divider} />
-          
-          <TouchableOpacity
-            style={styles.settingItem}
-            onPress={() => Linking.openURL('https://manyconnection.co.jp')}
-          >
-            <View style={styles.settingLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#D1FAE5' }]}>
-                <Shield size={20} color="#10B981" />
+        </View>
+
+        {/* データ管理 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>データ管理</Text>
+          <View style={styles.card}>
+            <TouchableOpacity 
+              style={styles.settingItem}
+              onPress={handleRefreshData}
+              disabled={!settings.zaimConnected}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[
+                  styles.iconBox, 
+                  { backgroundColor: settings.zaimConnected ? '#DBEAFE' : '#F3F4F6' }
+                ]}>
+                  <RefreshCw 
+                    size={20} 
+                    color={settings.zaimConnected ? '#3B82F6' : '#9CA3AF'} 
+                  />
+                </View>
+                <View>
+                  <Text style={[
+                    styles.settingLabel,
+                    !settings.zaimConnected && { color: '#9CA3AF' }
+                  ]}>
+                    データを再読込
+                  </Text>
+                  <Text style={styles.settingDesc}>
+                    {settings.zaimConnected 
+                      ? '最新の明細を取得' 
+                      : 'Zaim連携後に利用可能'}
+                  </Text>
+                </View>
               </View>
-              <View>
-                <Text style={styles.settingLabel}>プライバシーポリシー</Text>
-                <Text style={styles.settingDesc}>manyconnection.co.jp</Text>
+              <ChevronRight size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+            
+            <View style={styles.divider} />
+            
+            <TouchableOpacity style={styles.settingItem}>
+              <View style={styles.settingLeft}>
+                <View style={[styles.iconBox, { backgroundColor: '#FCE7F3' }]}>
+                  <Database size={20} color="#EC4899" />
+                </View>
+                <View>
+                  <Text style={styles.settingLabel}>ローカルデータ</Text>
+                  <Text style={styles.settingDesc}>予算設定はデバイスに保存</Text>
+                </View>
+              </View>
+              <ChevronRight size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* アプリ情報 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>アプリ情報</Text>
+          <View style={styles.card}>
+            <View style={styles.settingItem}>
+              <View style={styles.settingLeft}>
+                <View style={[styles.iconBox, { backgroundColor: '#E0E7FF' }]}>
+                  <Info size={20} color="#6366F1" />
+                </View>
+                <View>
+                  <Text style={styles.settingLabel}>バージョン</Text>
+                  <Text style={styles.settingDesc}>1.0.1</Text>
+                </View>
               </View>
             </View>
-            <ExternalLink size={20} color="#9CA3AF" />
-          </TouchableOpacity>
+            
+            <View style={styles.divider} />
+            
+            <TouchableOpacity
+              style={styles.settingItem}
+              onPress={() => Linking.openURL('https://manyconnection.co.jp')}
+            >
+              <View style={styles.settingLeft}>
+                <View style={[styles.iconBox, { backgroundColor: '#D1FAE5' }]}>
+                  <Shield size={20} color="#10B981" />
+                </View>
+                <View>
+                  <Text style={styles.settingLabel}>プライバシーポリシー</Text>
+                  <Text style={styles.settingDesc}>manyconnection.co.jp</Text>
+                </View>
+              </View>
+              <ExternalLink size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          BudgetPace © 2025 ManyConnection LLC
-        </Text>
-      </View>
-    </ScrollView>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            BudgetPace © 2025 ManyConnection LLC
+          </Text>
+        </View>
+      </ScrollView>
+
+      {/* PIN入力モーダル */}
+      <Modal
+        visible={showPINModal}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCancelAuth}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <TouchableOpacity style={styles.modalClose} onPress={handleCancelAuth}>
+              <X size={24} color="#6B7280" />
+            </TouchableOpacity>
+            
+            <View style={styles.modalIconBox}>
+              <Key size={32} color="#F59E0B" />
+            </View>
+            
+            <Text style={styles.modalTitle}>認証コードを入力</Text>
+            <Text style={styles.modalDesc}>
+              Safariで認証を完了すると、{'\n'}
+              画面に表示されるコードを入力してください
+            </Text>
+            
+            <TextInput
+              style={styles.pinInput}
+              value={pinCode}
+              onChangeText={setPinCode}
+              placeholder="認証コード"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            
+            <TouchableOpacity
+              style={[styles.submitButton, !pinCode.trim() && styles.submitButtonDisabled]}
+              onPress={handleSubmitPIN}
+              disabled={isSubmittingPIN || !pinCode.trim()}
+            >
+              {isSubmittingPIN ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.submitButtonText}>連携を完了</Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancelAuth}>
+              <Text style={styles.cancelButtonText}>キャンセル</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#F9FAFB',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#F9FAFB',
   },
   section: {
@@ -213,6 +446,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
   },
   iconBox: {
     width: 40,
@@ -232,6 +466,9 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -252,5 +489,82 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 12,
     color: '#9CA3AF',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+    alignItems: 'center',
+  },
+  modalClose: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+  },
+  modalIconBox: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#FEF3C7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 8,
+  },
+  modalDesc: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  pinInput: {
+    width: '100%',
+    height: 50,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  submitButton: {
+    width: '100%',
+    height: 50,
+    backgroundColor: '#10B981',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  submitButtonDisabled: {
+    backgroundColor: '#9CA3AF',
+  },
+  submitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    padding: 8,
+  },
+  cancelButtonText: {
+    color: '#6B7280',
+    fontSize: 14,
   },
 });

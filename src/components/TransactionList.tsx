@@ -1,26 +1,26 @@
 import React from 'react';
 import { View, Text, StyleSheet, FlatList } from 'react-native';
 import { Receipt } from 'lucide-react-native';
-import { ZaimMoney, ZaimCategory } from '../types';
+import { ZaimMoney, ZaimCategory, BudgetGoal } from '../types';
 import { formatCurrency } from '../utils/calculations';
-import { MOCK_CATEGORIES, CATEGORY_COLORS } from '../data/mockData';
 
 interface TransactionListProps {
   transactions: ZaimMoney[];
+  goals: BudgetGoal[];
   limit?: number;
 }
 
-export function TransactionList({ transactions, limit }: TransactionListProps) {
+export function TransactionList({ transactions, goals, limit }: TransactionListProps) {
   // 日付で降順ソート
   const sortedTransactions = [...transactions]
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, limit);
 
   const getCategoryInfo = (categoryId: number) => {
-    const category = MOCK_CATEGORIES.find(c => c.id === categoryId);
+    const goal = goals.find(g => g.categoryId === categoryId);
     return {
-      name: category?.name || 'その他',
-      color: CATEGORY_COLORS[categoryId] || '#6B7280',
+      name: goal?.categoryName || 'その他',
+      color: goal?.color || '#6B7280',
     };
   };
 
