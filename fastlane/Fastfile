@@ -1,0 +1,51 @@
+default_platform(:ios)
+
+platform :ios do
+  desc "Build and upload to TestFlight"
+  lane :beta do
+    setup_ci if ENV['CI']
+    
+    # Get the latest provisioning profile
+    get_provisioning_profile(
+      app_identifier: "co.manyconnection.budgetpace",
+      username: "tada@manyconnection.co.jp",
+      team_id: "RGF6H9P2VS",
+      output_path: "./fastlane/profiles",
+      readonly: false
+    )
+    
+    # Build
+    build_app(
+      workspace: "./ios/budgetpace.xcworkspace",
+      scheme: "budgetpace",
+      export_method: "app-store",
+      export_options: {
+        provisioningProfiles: {
+          "co.manyconnection.budgetpace" => "co.manyconnection.budgetpace AppStore"
+        }
+      },
+      output_directory: "./build",
+      output_name: "budgetpace.ipa"
+    )
+    
+    # Upload to TestFlight
+    upload_to_testflight(
+      api_key_path: "~/.appstoreconnect/api_key.json",
+      skip_waiting_for_build_processing: true
+    )
+  end
+  
+  desc "Create App Store Connect app"
+  lane :create_app do
+    create_app_online(
+      username: "tada@manyconnection.co.jp",
+      app_identifier: "co.manyconnection.budgetpace",
+      app_name: "BudgetPace",
+      language: "Japanese",
+      app_version: "1.0.0",
+      sku: "budgetpace-001",
+      team_id: "RGF6H9P2VS",
+      itc_team_id: "124268389"
+    )
+  end
+end
